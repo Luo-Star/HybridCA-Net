@@ -1,0 +1,15 @@
+batch_size: 4
+learning_rate: 0.001
+num_epochs: 100
+num_classes: 2
+dropout_prob: 0.5
+fmri_cut_size: 80
+num_workers: 15
+root_dir: "/home/lwc/第二个工作对比实验/data"
+
+classes: ['AD','NC']
+
+# 当使用单模态时 下述参数失效
+attention_type: "cross"  # 可选值: 'cross', 'add', 'multiply'
+use_consistency_loss: True
+lambda1: 0.1
