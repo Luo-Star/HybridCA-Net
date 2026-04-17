@@ -23,7 +23,7 @@ HybridCA-Net is an innovative multimodal fusion solution designed to tackle four
 
 
 ## Code Release Notice  
-The complete codebase (including module implementations, training scripts, and test cases) will be released **shortly**! Stay tuned to this repository for updates.  
+The complete codebase (including module implementations, training scripts, and test cases) has been uploaded！ Welcome to download and use.
 
 
 ## Usage and Citation  
@@ -31,4 +31,4 @@ The complete codebase (including module implementations, training scripts, and t
 - **Academic Citation**: If used in research papers, please contact us in advance for citation guidelines.  
 - **Contact**: For inquiries, monitor this repository for updated contact information.  
 
-**Updated Date**: May 28, 2025
+**Updated Date**: April 17, 2026
