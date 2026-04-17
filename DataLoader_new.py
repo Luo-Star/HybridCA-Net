@@ -4,13 +4,13 @@ import random
 import numpy as np
 import torch
 import nibabel as nib
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from collections import Counter
-import matplotlib.pyplot as plt
+
 
 class FusionDataset(Dataset):
     def __init__(self, root_dir, fmri_cut_size=80, split='train', train_ratio=0.8, val_ratio=0.1, test_ratio=0.1,
-                 seed=42, classes=('AD', 'MCI', 'NC')):
+                 seed=42, classes=('AD', 'MCI', 'NC'), balance_method=None):
         self.root_dir = root_dir
         self.fmri_cut_size = fmri_cut_size
         self.data = []
@@ -21,8 +21,11 @@ class FusionDataset(Dataset):
         self.test_ratio = test_ratio
         self.seed = seed
         self.classes = classes
+        self.balance_method = balance_method
         self._load_data()
         self._split_data()
+        if split == 'train' and balance_method and set(classes) == {'MCI', 'NC'}:
+            self._balance_data()
 
     def _load_data(self):
         for label_dir in os.listdir(self.root_dir):
@@ -64,6 +67,20 @@ class FusionDataset(Dataset):
         elif self.split == 'test':
             self.data = [self.data[i] for i in indices[val_end:]]
 
+    def _balance_data(self):
+        targets = [label for _, _, label, _ in self.data]
+        class_counts = Counter(targets)
+        min_count = min(class_counts.values())
+
+        balanced_data = []
+        for target_class in class_counts:
+            class_data = [item for item in self.data if item[2] == target_class]
+            if self.balance_method == 'undersample':
+                class_data = random.sample(class_data, min_count)
+            balanced_data.extend(class_data)
+
+        self.data = balanced_data
+
     def __len__(self):
         return len(self.data)
 
@@ -73,8 +90,10 @@ class FusionDataset(Dataset):
         fmri_data = self._load_txt_file(fmri_path)
         fmri_data = self._standardize_data(fmri_data)
         return smri_data, fmri_data, label
+
     def get_targets(self):
         return [label for _, _, label, _ in self.data]
+
     def _load_nii_file(self, file_path):
         nii_img = nib.load(file_path)
         data = nii_img.get_fdata()
@@ -95,23 +114,6 @@ class FusionDataset(Dataset):
         return (data - mean) / std
 
 
-def get_label_distribution(dataset):
-    labels = [label for _, _, label, _ in dataset]
-    counter = Counter(labels)
-    total = len(labels)
-    distribution = {label: count / total for label, count in counter.items()}
-    return distribution
-def extract_specific_format(data):
-    results = []
-    for path in data:
-        parts = path[3].split('/')
-        if len(parts) > 8:  # 确保路径足够长
-            results.append(parts[8])
-    return results
-# 比较三个 results 是否有重复项
-def find_duplicates(list1, list2, list3):
-    duplicates = set(list1) & set(list2) & set(list3)
-    return list(duplicates)
 def count_classes(dataset):
     counter = Counter()
     for _, _, label in dataset:
@@ -119,43 +121,16 @@ def count_classes(dataset):
     return counter
 
 
-def balance_dataset(dataset, method='undersample'):
-    from collections import Counter
-    from torch.utils.data import Subset
-
-    targets = dataset.get_targets()
-    class_counts = Counter(targets)
-    max_count = max(class_counts.values())
-
-    if method == 'oversample':
-        indices = []
-        for target_class in class_counts:
-            class_indices = [i for i, target in enumerate(targets) if target == target_class]
-            indices.extend(class_indices)
-            while len(indices) < max_count * len(class_counts):
-                indices.extend(random.choices(class_indices, k=max_count - len(class_indices)))
-
-    elif method == 'undersample':
-        indices = []
-        for target_class in class_counts:
-            class_indices = [i for i, target in enumerate(targets) if target == target_class]
-            indices.extend(class_indices)
-            while len(indices) < min(class_counts.values()) * len(class_counts):
-                indices = indices[:min(class_counts.values()) * len(class_counts)]
-
-    balanced_dataset = Subset(dataset, indices)
-    return balanced_dataset
-
-
 if __name__ == '__main__':
-    root_dir = '/media/lwc/Lwc/ADNI-raw/处理好的数据/融合'
+    root_dir = '../data'
     fmri_cut_size = 80  # Default size is 80, modify if needed
 
     # Example usage with different class combinations
-    train_dataset = FusionDataset(root_dir, fmri_cut_size=fmri_cut_size, split='train', classes=['MCI', 'NC'])
-    val_dataset = FusionDataset(root_dir, fmri_cut_size=fmri_cut_size, split='val', classes=['MCI','NC'])
-    test_dataset =   FusionDataset(root_dir, fmri_cut_size=fmri_cut_size, split='test', classes=['MCI','NC'])
-    # balanced_train_dataset = balance_dataset(train_dataset, method='undersample')
+    train_dataset = FusionDataset(root_dir, fmri_cut_size=fmri_cut_size, split='train', classes=['MCI', 'NC'],
+                                  balance_method='undersample')
+    val_dataset = FusionDataset(root_dir, fmri_cut_size=fmri_cut_size, split='val', classes=['MCI', 'NC'])
+    test_dataset = FusionDataset(root_dir, fmri_cut_size=fmri_cut_size, split='test', classes=['MCI', 'NC'])
+
     # 统计每个数据集中各类的数量
     train_class_counts = count_classes(train_dataset)
     val_class_counts = count_classes(val_dataset)

@@ -1,12 +1,12 @@
 import os
 import random
-
 import numpy as np
 import torch
 import nibabel as nib
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from collections import Counter
 import matplotlib.pyplot as plt
+from sklearn.model_selection import KFold
 
 class FusionDataset(Dataset):
     def __init__(self, root_dir, fmri_cut_size=80, split='train', train_ratio=0.8, val_ratio=0.1, test_ratio=0.1,
@@ -73,8 +73,10 @@ class FusionDataset(Dataset):
         fmri_data = self._load_txt_file(fmri_path)
         fmri_data = self._standardize_data(fmri_data)
         return smri_data, fmri_data, label
+
     def get_targets(self):
         return [label for _, _, label, _ in self.data]
+
     def _load_nii_file(self, file_path):
         nii_img = nib.load(file_path)
         data = nii_img.get_fdata()
@@ -94,30 +96,30 @@ class FusionDataset(Dataset):
         std = torch.std(data)
         return (data - mean) / std
 
-
 def get_label_distribution(dataset):
     labels = [label for _, _, label, _ in dataset]
     counter = Counter(labels)
     total = len(labels)
     distribution = {label: count / total for label, count in counter.items()}
     return distribution
+
 def extract_specific_format(data):
     results = []
     for path in data:
         parts = path[3].split('/')
-        if len(parts) > 8:  # 确保路径足够长
+        if len(parts) > 8:
             results.append(parts[8])
     return results
-# 比较三个 results 是否有重复项
+
 def find_duplicates(list1, list2, list3):
     duplicates = set(list1) & set(list2) & set(list3)
     return list(duplicates)
+
 def count_classes(dataset):
     counter = Counter()
     for _, _, label in dataset:
         counter[label] += 1
     return counter
-
 
 def balance_dataset(dataset, method='undersample'):
     from collections import Counter
@@ -146,21 +148,52 @@ def balance_dataset(dataset, method='undersample'):
     balanced_dataset = Subset(dataset, indices)
     return balanced_dataset
 
+def get_kfold_dataloaders(dataset, batch_size, num_workers, num_folds=10):
+    kf = KFold(n_splits=num_folds, shuffle=True, random_state=42)
+    fold_dataloaders = []
+
+    for fold, (train_idx, val_idx) in enumerate(kf.split(dataset)):
+        train_subset = Subset(dataset, train_idx)
+        val_subset = Subset(dataset, val_idx)
+
+        train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+        val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+
+        fold_dataloaders.append((train_loader, val_loader))
+
+    return fold_dataloaders
+
 
 if __name__ == '__main__':
     root_dir = '/media/lwc/Lwc/ADNI-raw/处理好的数据/融合'
-    fmri_cut_size = 80  # Default size is 80, modify if needed
+    fmri_cut_size = 80
 
-    # Example usage with different class combinations
-    train_dataset = FusionDataset(root_dir, fmri_cut_size=fmri_cut_size, split='train', classes=['MCI', 'NC'])
-    val_dataset = FusionDataset(root_dir, fmri_cut_size=fmri_cut_size, split='val', classes=['MCI','NC'])
-    test_dataset =   FusionDataset(root_dir, fmri_cut_size=fmri_cut_size, split='test', classes=['MCI','NC'])
-    # balanced_train_dataset = balance_dataset(train_dataset, method='undersample')
-    # 统计每个数据集中各类的数量
-    train_class_counts = count_classes(train_dataset)
-    val_class_counts = count_classes(val_dataset)
-    test_class_counts = count_classes(test_dataset)
+    dataset = FusionDataset(root_dir, fmri_cut_size=fmri_cut_size, split='all', classes=['AD', 'MCI', 'NC'])
+    fold_dataloaders = get_kfold_dataloaders(dataset, batch_size=32, num_workers=4, num_folds=10)
 
-    print(f"Train dataset class counts: {train_class_counts}")
-    print(f"Validation dataset class counts: {val_class_counts}")
-    print(f"Test dataset class counts: {test_class_counts}")
+    all_train_results = []
+    all_val_results = []
+
+    all_val_data_indices = []
+
+    for fold, (train_loader, val_loader) in enumerate(fold_dataloaders):
+        train_data_indices = [train_loader.dataset.indices[i] for i in range(len(train_loader.dataset))]
+        val_data_indices = [val_loader.dataset.indices[i] for i in range(len(val_loader.dataset))]
+
+        # Check for overlap within the current fold
+        overlap_within_fold = set(train_data_indices) & set(val_data_indices)
+        if overlap_within_fold:
+            print(f'Fold {fold + 1}: Train and validation sets have overlap: {overlap_within_fold}')
+        else:
+            print(f'Fold {fold + 1}: No overlap between train and validation sets.')
+
+        # Check for overlap with previous validation sets
+        for previous_val_data in all_val_data_indices:
+            overlap_between_folds = set(val_data_indices) & set(previous_val_data)
+            if overlap_between_folds:
+                print(f'Fold {fold + 1}: Overlap with another fold: {overlap_between_folds}')
+
+        all_val_data_indices.append(val_data_indices)
+
+        print(f'Fold {fold + 1} Validation data indices: {val_data_indices}')
+        print('--------------------------')
